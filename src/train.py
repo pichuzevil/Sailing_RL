@@ -83,7 +83,7 @@ def train():
             # Buffer handles normalization internally now!
             memory.push(obs[:6], action, shaped_r, next_obs[:6], terminated)
             
-            if len(memory) > args.batch_size:
+            if step % 4 == 0 and len(memory) > args.batch_size:
                 # Optimized block using utility tensors
                 states, actions, rewards, snext, dones = memory.sample()
 
