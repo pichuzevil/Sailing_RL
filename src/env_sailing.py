@@ -3,8 +3,8 @@ import numpy as np # type: ignore
 import matplotlib.pyplot as plt # type: ignore
 from matplotlib.patches import Circle, Arrow # type: ignore
 from typing import Tuple, Dict, Any, Optional # type: ignore
-from src.sailing_physics import calculate_sailing_efficiency # type: ignore
-from src.rendering import (build_island_layer, draw_scene, draw_boat, # type: ignore
+from sailing_physics import calculate_sailing_efficiency # type: ignore
+from rendering import (build_island_layer, draw_scene, draw_boat, # type: ignore
                            draw_trajectory)
 import gymnasium as gym # type: ignore
 
