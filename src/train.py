@@ -18,6 +18,7 @@ from agents.dqn_agent import DQNAgent
 from utils.replay_buffer import ReplayBuffer
 from utils.rewards import calculate_sailing_reward
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a DQN Sailing Agent")
     parser.add_argument("--episodes", type=int, default=5000, help="Total episodes")
@@ -112,7 +113,8 @@ def train():
         # Only save if we have enough samples and performance has improved
         if ep > 100 and current_success_rate > best_success_rate:
             best_success_rate = current_success_rate
-            torch.save(agent.policy_net.state_dict(), "src/agents/dqn_weights.pth")
+            #torch.save(agent.policy_net.state_dict(), "src/agents/dqn_weights.pth")
+            torch.save(agent.policy_net.state_dict(), "/content/drive/MyDrive/dqn_weights.pth")
             print(f" New Best Success Rate: {best_success_rate:.2f}! Weights saved.")
 
         epsilon = max(0.05, epsilon * args.epsilon_decay)
