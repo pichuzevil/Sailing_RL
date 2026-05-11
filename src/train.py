@@ -17,6 +17,7 @@ from wind_scenarios import get_wind_scenario
 from agents.dqn_agent import DQNAgent
 from utils.replay_buffer import ReplayBuffer
 from utils.rewards import calculate_sailing_reward
+from utils.paths import get_dqn_save_path
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a DQN Sailing Agent")
@@ -37,9 +38,12 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     scenarios = ["training_1", "training_2", "training_3"]
     
-    # Path for Google Drive
-    save_path = "/content/drive/MyDrive/dqn_weights.pth"
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # 1. Detect the correct save path automatically
+    weights_path = get_dqn_save_path()
+    print(f" Weights will be saved to: {weights_path}")
+
+    # 2. Initialize Agent (pass the weights_path so it can resume)
+    agent = DQNAgent(state_size=6, action_size=9, weights_path=weights_path)
     
     # Initialize Agent and Optimizer
     agent = DQNAgent(state_size=6, action_size=9)
@@ -124,10 +128,11 @@ def train():
         # This prioritizes reaching the goal, then falling back to distance/efficiency
         current_metric = (avg_success * 1000) + avg_reward
         
+        # 3. Update the "Save Best" logic to use the dynamic path
         if ep > 50 and current_metric > best_metric:
             best_metric = current_metric
-            torch.save(agent.policy_net.state_dict(), save_path)
-            print(f"🌟 Saved New Best (Succ: {avg_success:.2f}, Rew: {avg_reward:.2f})")
+            torch.save(agent.policy_net.state_dict(), weights_path)
+            print(f" Saved New Best to {os.path.basename(weights_path)} (Metric: {best_metric:.2f})")
 
         # Update exploration and target network
         epsilon = max(0.05, epsilon * args.epsilon_decay)

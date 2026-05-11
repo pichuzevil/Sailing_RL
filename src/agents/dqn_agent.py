@@ -6,7 +6,7 @@ from agents.base_agent import BaseAgent
 from models.dqn_networks import SailingQNetwork
 
 class DQNAgent(BaseAgent):
-    def __init__(self, state_size=6, action_size=9, epsilon=0.1):
+    def __init__(self, state_size=6, action_size=9, epsilon=0.1, weights_path=None):
         """
         DQN Agent for sailing navigation.
         
@@ -25,13 +25,16 @@ class DQNAgent(BaseAgent):
         self.target_net = SailingQNetwork(state_size, action_size).to(self.device)
         
         # 2. Load existing weights if they exist (to resume training)
-        weights_path = os.path.join(os.path.dirname(__file__), 'dqn_weights.pth')
+        if weights_path is None:
+            from utils.paths import get_dqn_save_path
+            weights_path = get_dqn_save_path()
+
         if os.path.exists(weights_path):
-            state_dict = torch.load(weights_path, map_location=self.device)
-            self.policy_net.load_state_dict(state_dict)
-            print(f"DQNAgent: Resuming from weights at {weights_path}")
+            self.policy_net.load_state_dict(torch.load(weights_path, map_location=self.device))
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+            print(f" DQNAgent: Resuming from {weights_path}")
         else:
-            print("DQNAgent: Starting training from scratch.")
+            print(" DQNAgent: No weights found. Starting fresh.")
 
         # 3. Synchronize networks
         self.target_net.load_state_dict(self.policy_net.state_dict())
