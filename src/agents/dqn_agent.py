@@ -57,7 +57,7 @@ class DQNAgent(BaseAgent):
         self.policy_net.train()
         
         return int(np.argmax(action_values.cpu().data.numpy()))
-
+    
     def reset(self):
         """Reset internal state if needed (not required for standard DQN)."""
         pass
