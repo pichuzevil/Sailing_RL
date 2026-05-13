@@ -12,11 +12,12 @@ class DQNAgent(BaseAgent):
         STATE_SIZE should be 10 to include relative navigation features.
         """
         super().__init__()
+        super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.action_size = action_size
         self.epsilon = epsilon
         
-        # 1. Initialize Networks with the CORRECT state size (10)
+        # Ensure state_size matches the 10-feature vector
         self.policy_net = SailingDuelingQNetwork(state_size, action_size).to(self.device)
         self.target_net = SailingDuelingQNetwork(state_size, action_size).to(self.device)
         
@@ -35,30 +36,29 @@ class DQNAgent(BaseAgent):
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval() 
 
-    def preprocess_obs(self, observation, goal_pos=(110, 10)):
+    def preprocess_obs(self, observation, goal_pos=(110, 10), prev_action=0):
         """
         Transforms raw observation into a high-signal 10-feature vector.
-        Features: [x, y, vx, vy, wx, wy, dx, dy, dist, angle_to_goal]
+        Added 'prev_action' to the signature to match the training loop call.
         """
-        # Ensure we don't modify the original array
-        raw_obs = observation[:6].copy()
+        # 1. Base 6 features
+        obs = observation[:6].copy()
         
-        # 1. Normalization (Keeps gradients stable)
-        raw_obs[0:2] /= 128.0  # x, y coords
-        raw_obs[2:4] /= 8.0    # boat velocity
-        raw_obs[4:6] /= 10.0   # wind velocity
+        # 2. Normalization
+        obs[0:2] /= 128.0  # x, y
+        obs[2:4] /= 8.0    # vx, vy
+        obs[4:6] /= 10.0   # wx, wy
         
-        # 2. Relative Navigation (The "Compass")
-        # How far is the goal?
+        # 3. Relative Navigation
         dx = (goal_pos[0] - observation[0]) / 128.0
         dy = (goal_pos[1] - observation[1]) / 128.0
         dist = np.sqrt(dx**2 + dy**2)
+        angle = np.arctan2(dy, dx) / np.pi 
         
-        # What is the angle to the goal? (Normalized between -1 and 1)
-        angle_to_goal = np.arctan2(dy, dx) / np.pi
-        
-        # Return the 10-feature vector
-        return np.concatenate([raw_obs, [dx, dy, dist, angle_to_goal]]).astype(np.float32)
+        # We return 10 features. 
+        # (If you eventually want the agent to 'see' its last action, 
+        # you could append prev_action/9.0 here and change STATE_SIZE to 11).
+        return np.concatenate([obs, [dx, dy, dist, angle]]).astype(np.float32)
 
     def act_from_vec(self, state_vec):
         """
