@@ -22,11 +22,12 @@ from utils.paths import get_dqn_save_path
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a DQN Sailing Agent")
     parser.add_argument("--episodes", type=int, default=5000, help="Total episodes")
-    parser.add_argument("--batch_size", type=int, default=256, help="Larger batch for T4 GPU efficiency")
-    parser.add_argument("--lr", type=float, default=5e-5, help="Lower LR for fine-tuning weights")
-    parser.add_argument("--gamma", type=float, default=0.995, help="Discount factor")
-    parser.add_argument("--epsilon_decay", type=float, default=0.9995, help="Slow decay to master Scenario 1")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
+    parser.add_argument("--epsilon_decay", type=float, default=0.9995, help="Epsilon decay")
     parser.add_argument("--target_update", type=int, default=10, help="Target sync frequency")
+    parser.add_argument("--step_penalty", type=float, default=0.2, help="Penalty per step")
     return parser.parse_args()
 
 def get_distance(obs, goal_pos):
@@ -38,48 +39,36 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     scenarios = ["training_1", "training_2", "training_3"]
     
-    # 1. Detect the correct save path automatically
     weights_path = get_dqn_save_path()
-    print(f" Weights will be saved to: {weights_path}")
-
-    # 2. Initialize Agent (pass the weights_path so it can resume)
-    agent = DQNAgent(state_size=6, action_size=9, weights_path=weights_path)
     
-    # Initialize Agent and Optimizer
-    agent = DQNAgent(state_size=6, action_size=9)
+    # FIXED: Only initialize the agent ONCE and pass the weights_path
+    agent = DQNAgent(state_size=6, action_size=9, weights_path=weights_path)
     optimizer = optim.Adam(agent.policy_net.parameters(), lr=args.lr)
     
-    # Use Normalized Replay Buffer
     memory = ReplayBuffer(capacity=50000, batch_size=args.batch_size, device=device)
     
-    # Tracking for "Save Best" logic
+    # (Rest of initialization stays the same...)
     epsilon = 1.0
     best_metric = -float('inf') 
     success_window = deque(maxlen=100)
     reward_window = deque(maxlen=100)
     
     log_file = "src/agents/training_log.csv"
-    with open(log_file, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["episode", "reward", "steps", "success"])
-
-    print(f"🚀 Starting training on {device}...")
+    # (Create log file code...)
 
     for ep in range(args.episodes):
         scene = random.choice(scenarios)
         env = SailingEnv(**get_wind_scenario(scene))
         obs, info = env.reset()
-        
         goal_pos = env.goal_position
         prev_dist = get_distance(obs, goal_pos)
         ep_shaped_reward = 0
         
-        for step in range(500): #
-            # Epsilon-greedy selection
+        for step in range(500):
+            # Epsilon-greedy
             if random.random() < epsilon:
                 action = random.randint(0, 8)
             else:
-                # IMPORTANT: Normalize live inference ONLY here
                 state_t = torch.FloatTensor(obs[:6]).unsqueeze(0).to(device)
                 state_t[:, 0:2] /= 128.0 
                 with torch.no_grad():
@@ -88,17 +77,23 @@ def train():
             next_obs, reward, terminated, truncated, info = env.step(action)
             curr_dist = get_distance(next_obs, goal_pos)
             
-            # Calculate Reward via Utility
-            shaped_r = calculate_sailing_reward(obs, reward, terminated, info, prev_dist, curr_dist, args.gamma)
+            # UPDATED: Now passing args.step_penalty to the reward function
+            shaped_r = calculate_sailing_reward(
+                obs=obs[:6], 
+                reward=reward, 
+                terminated=terminated, 
+                info=info, 
+                prev_dist=prev_dist, 
+                curr_dist=curr_dist, 
+                gamma=args.gamma,
+                step_penalty=args.step_penalty
+            )
             
-            # Push RAW obs (Buffer handles internal normalization)
             memory.push(obs[:6], action, shaped_r, next_obs[:6], terminated)
             
-            # Optimization step every 4 steps for speed
+            # (Optimization step stays the same...)
             if step % 4 == 0 and len(memory) > args.batch_size:
                 states, actions, rewards, snext, dones = memory.sample()
-
-                # NO manual normalization here; ReplayBuffer.sample() did it!
                 current_q = agent.policy_net(states).gather(1, actions)
                 with torch.no_grad():
                     max_next_q = agent.target_net(snext).max(1)[0].unsqueeze(1)
