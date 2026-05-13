@@ -23,7 +23,7 @@ def calculate_sailing_reward(obs, reward, terminated, info, prev_dist, curr_dist
         # VMG = Projection of velocity onto the goal direction
         vmg = np.dot(vel_boat, unit_vec_to_goal)
         # Higher multiplier (2.0) makes speed much more valuable than safe positioning
-        total_reward += vmg * 2.0 
+        total_reward += vmg * 4.0 
 
     # 3. Wind Efficiency & Optimal Tacking Angle
     # Upwind sailing is fastest at 'Close Hauled' (~45 degrees to wind).
