@@ -16,7 +16,7 @@ from env_sailing import SailingEnv
 from wind_scenarios import get_wind_scenario
 from agents.dqn_agent import DQNAgent
 from utils.replay_buffer import ReplayBuffer
-from utils.rewards import calculate_sailing_reward # Ensure this is updated with the enhanced logic
+from utils.rewards import calculate_enhanced_reward # Ensure this is updated with the enhanced logic
 from utils.paths import get_dqn_save_path
 
 def parse_args():
@@ -86,9 +86,9 @@ def train():
             
             # 1. Enhanced Reward Calculation
             # This now accounts for action switching and high-precision VMG
-            shaped_r = calculate_sailing_reward(
-                obs=obs, 
-                next_obs=next_obs,
+            shaped_r = calculate_enhanced_reward(
+                state=obs, 
+                next_state=next_obs,
                 action=action,
                 prev_action=prev_action,
                 reward=reward, 
