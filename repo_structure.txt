@@ -1,0 +1,49 @@
+.
+├── README.md
+├── dump.py
+├── illustration_challenge.png
+├── notebooks
+│   ├── challenge_walkthrough.ipynb
+│   ├── design_agent.ipynb
+│   ├── evaluate_agent.ipynb
+│   ├── validate_agent.ipynb
+│   └── visualize_agent.ipynb
+├── plot_results.py
+├── project_dump.tar.gz
+├── repo_structure.txt
+├── requirements.txt
+├── sailing_environment.png
+├── src
+│   ├── agents
+│   │   ├── agent_super_naive.py
+│   │   ├── agent_trained_example.py
+│   │   ├── base_agent.py
+│   │   ├── dqn_agent.py
+│   │   ├── dqn_weights.pth
+│   │   ├── learning_curve.png
+│   │   ├── my_agent.py
+│   │   ├── test.py
+│   │   ├── test_submission.py
+│   │   └── training_log.csv
+│   ├── env_sailing.py
+│   ├── evaluate_submission.py
+│   ├── evaluation.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   └── dqn_networks.py
+│   ├── rendering.py
+│   ├── sailing_physics.py
+│   ├── test_agent_validity.py
+│   ├── train.py
+│   ├── utils
+│   │   ├── __init__.py
+│   │   ├── agent_utils.py
+│   │   ├── paths.py
+│   │   ├── replay_buffer.py
+│   │   └── rewards.py
+│   ├── visualization.py
+│   └── wind_scenarios
+│       └── __init__.py
+└── to_codabench.py
+
+7 directories, 40 files

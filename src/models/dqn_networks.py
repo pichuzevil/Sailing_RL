@@ -2,41 +2,40 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SailingQNetwork(nn.Module):
-    """
-    Neural Network for Deep Q-Learning in the sailing environment.
-    Designed to process local boat state and wind conditions.
-    """
-    def __init__(self, state_size=6, action_size=9, hidden_size=128):
-        """
-        Initialize the network.
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SailingDuelingQNetwork(nn.Module):
+    def __init__(self, state_size=10, action_size=9, hidden_size=256):
+        super(SailingDuelingQNetwork, self).__init__()
         
-        Args:
-            state_size (int): Dimension of input features (default 6: pos, vel, wind).
-            action_size (int): Number of possible directions (default 9).
-            hidden_size (int): Number of neurons in hidden layers.
-        """
-        super(SailingQNetwork, self).__init__()
+        # Shared feature extractor
+        self.feature_layer = nn.Sequential(
+            nn.Linear(state_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
+        )
         
-        # Layer 1: Input to first hidden layer
-        self.fc1 = nn.Linear(state_size, hidden_size)
+        # State Value stream (V)
+        self.value_stream = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, 1)
+        )
         
-        # Layer 2: Deeper representation of sailing physics
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        
-        # Layer 3: Output layer (one Q-value per action)
-        self.fc3 = nn.Linear(hidden_size, action_size)
+        # Action Advantage stream (A)
+        self.advantage_stream = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, action_size)
+        )
 
     def forward(self, state):
-        """
-        Maps state to action values (Q-values).
+        features = self.feature_layer(state)
+        value = self.value_stream(features)
+        advantages = self.advantage_stream(features)
         
-        Args:
-            state (torch.Tensor): The normalized local observation vector.
-        """
-        # ReLU activation allows the network to model non-linear sailing efficiency
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        
-        # No activation on the final layer; we want raw Q-value scores
-        return self.fc3(x)
+        # Combine using the stable dueling formula
+        return value + (advantages - advantages.mean(dim=1, keepdim=True))
