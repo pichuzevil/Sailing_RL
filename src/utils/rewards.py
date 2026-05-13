@@ -1,54 +1,57 @@
 import numpy as np
 
-def calculate_sailing_reward(obs, reward, terminated, info, prev_dist, curr_dist, gamma=0.995):
+def calculate_sailing_reward(obs, reward, terminated, info, prev_dist, curr_dist, gamma=0.99):
     """
-    Optimized for Speed and VMG (Velocity Made Good).
-    Designed to cut step counts by rewarding high-speed progress.
+    Final Competition Version: Optimized for minimum steps and tight cornering.
+    Combines VMG, Centerline Bias, and High-Urgency Penalties.
     """
-    # 1. Base Environment Reward (+100 at goal)
-    total_reward = reward 
+    total_reward = reward # +100 for goal
 
-    # 2. VMG Calculation (Progress Velocity)
-    # This rewards CLOSING the distance at high speed, not just being closer.
+    # --- 1. VMG (Velocity Made Good) ---
+    # Rewards closure speed. This is the primary driver for faster times.
     pos_boat = obs[:2]
     vel_boat = obs[2:4]
-    
-    # Target is usually at (64, 127)
     goal_pos = np.array([64, 127]) 
+    
     vec_to_goal = goal_pos - pos_boat
     dist_to_goal = np.linalg.norm(vec_to_goal)
     
-    if dist_to_goal > 0:
+    if dist_to_goal > 1e-3:
         unit_vec_to_goal = vec_to_goal / dist_to_goal
-        # VMG = Projection of velocity onto the goal direction
+        # VMG = Projection of velocity onto goal direction
+        # $VMG = \vec{v} \cdot \hat{u}_{goal}$
         vmg = np.dot(vel_boat, unit_vec_to_goal)
-        # Higher multiplier (2.0) makes speed much more valuable than safe positioning
-        total_reward += vmg * 4.0 
+        total_reward += vmg * 3.0 # High weight on speed
 
-    # 3. Wind Efficiency & Optimal Tacking Angle
-    # Upwind sailing is fastest at 'Close Hauled' (~45 degrees to wind).
-    wind_vec = obs[4:6] 
+    # --- 2. Centerline Bias (The "Horseshoe Killer") ---
+    # Prevents the agent from drifting to the far edges (like in Scenario 3).
+    # Penalty increases as the boat moves away from the middle (x=64).
+    center_drift = abs(obs[0] - 64)
+    total_reward -= (center_drift / 128.0) * 0.15
+
+    # --- 3. Optimal Point of Sail (Close Hauled) ---
+    # Encourages the aerodynamic sweet spot for upwind speed.
+    wind_vec = obs[4:6]
     if np.linalg.norm(wind_vec) > 0 and np.linalg.norm(vel_boat) > 0:
         cos_theta = np.dot(wind_vec, vel_boat) / (np.linalg.norm(wind_vec) * np.linalg.norm(vel_boat))
-        angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+        angle = np.abs(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
         
-        # Heavy penalty for 'In Irons' (0-40 deg) to force the agent to keep its speed up
-        if angle < np.pi / 4.5: 
-            total_reward -= 0.2
-        # 'Sweet Spot' Bonus: Close Hauled (40-50 deg)
-        # This teaches the agent to point as high as possible without stalling.
-        elif np.pi/4.5 <= angle <= np.pi/3.5:
-            total_reward += 0.15
-        # Beam Reach Bonus (60-120 deg) - good for speed but might add steps
-        elif np.pi/3 < angle < 2*np.pi/3:
-            total_reward += 0.05
+        # Penalty for 'In Irons' (Stalling)
+        if angle < np.pi / 5:
+            total_reward -= 0.3
+        # Racing Bonus: Close Hauled (Fastest upwind angle)
+        elif np.pi/5 <= angle <= np.pi/3.5:
+            total_reward += 0.2
 
-    # 4. Increased Step Penalty (The 'Impatience' factor)
-    # Moving from 0.05 to 0.15 forces the agent to take shorter paths.
-    total_reward -= 0.15 
+    # --- 4. Extreme Step Penalty ---
+    # Tripled from the 'Safe' version. This creates massive urgency.
+    # Taking 140 steps now costs -42 points. Taking 80 steps only costs -24.
+    total_reward -= 0.3 
 
-    # 5. Massive Crash Penalty
+    # --- 5. Hard Crash Penalty ---
+    # Lowered slightly to -75. If it's too high (-100), the agent won't 
+    # take the risk of cutting the corner tightly.
     if info.get('collision', False) or (terminated and reward == 0):
-        total_reward -= 100.0 
+        total_reward -= 75.0
 
     return total_reward
