@@ -18,12 +18,11 @@ def calculate_sailing_reward(obs, reward, terminated, info, prev_dist, curr_dist
     # --- 2. The "Safety Buffer" (Island Repulsion) ---
     # Scenario 3 Island is roughly between y=40 and y=80, centered at x=64.
     # If we are in that 'latitude', we punish the agent for being too close to the center.
+    # 2. Narrower Safety Buffer
     if 35 < pos_boat[1] < 85:
         dist_from_center = abs(pos_boat[0] - 64)
-        if dist_from_center < 25: # If within 25 units of the island center
-            # Penalty gets MUCH stronger the closer we get
-            safety_penalty = (25 - dist_from_center) * 0.1
-            total_reward -= safety_penalty
+        if dist_from_center < 15: # Reduced from 25
+            total_reward -= (15 - dist_from_center) * 0.5
 
     # --- 3. Centerline Bias (Softened) ---
     # Only apply this when we are PAST the island (y > 85)
