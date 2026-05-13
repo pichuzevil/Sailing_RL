@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from collections import deque
 
-# Setup pathing for local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from env_sailing import SailingEnv
@@ -21,63 +20,68 @@ from utils.paths import get_dqn_save_path
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a DQN Sailing Agent")
-    parser.add_argument("--episodes", type=int, default=5000, help="Total episodes")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
-    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
-    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
-    parser.add_argument("--epsilon_decay", type=float, default=0.9995, help="Epsilon decay")
-    parser.add_argument("--target_update", type=int, default=10, help="Target sync frequency")
-    parser.add_argument("--step_penalty", type=float, default=0.2, help="Penalty per step")
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--epsilon_start", type=float, default=0.2, help="Start lower when refining weights")
+    parser.add_argument("--epsilon_decay", type=float, default=0.995)
+    parser.add_argument("--target_update", type=int, default=10)
+    parser.add_argument("--step_penalty", type=float, default=0.25)
     return parser.parse_args()
 
 def get_distance(obs, goal_pos):
-    """Euclidean distance to goal."""
     return np.linalg.norm(obs[:2] - goal_pos)
 
 def train():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # FOCUS on Scenario 3 (The Island) to break the 143-step barrier
     scenarios = ["training_1", "training_2", "training_3"]
+    scenario_weights = [0.15, 0.15, 0.70] 
     
     weights_path = get_dqn_save_path()
     
-    # FIXED: Only initialize the agent ONCE and pass the weights_path
+    # FIX 1: Initialize ONCE and keep the loaded weights
     agent = DQNAgent(state_size=6, action_size=9, weights_path=weights_path)
     optimizer = optim.Adam(agent.policy_net.parameters(), lr=args.lr)
     
     memory = ReplayBuffer(capacity=50000, batch_size=args.batch_size, device=device)
     
-    # (Rest of initialization stays the same...)
-    epsilon = 1.0
+    # FIX 2: Use the epsilon_start argument
+    epsilon = args.epsilon_start
     best_metric = -float('inf') 
     success_window = deque(maxlen=100)
     reward_window = deque(maxlen=100)
     
     log_file = "src/agents/training_log.csv"
-    # (Create log file code...)
+    if not os.path.exists(log_file):
+        with open(log_file, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["episode", "reward", "steps", "success"])
+
+    print(f"🚀 Refinement started on {device}...")
 
     for ep in range(args.episodes):
-        scene = random.choice(scenarios)
+        # FIX 3: Weighted scenario selection to master the hardest obstacle
+        scene = np.random.choice(scenarios, p=scenario_weights)
         env = SailingEnv(**get_wind_scenario(scene))
         obs, info = env.reset()
+        
         goal_pos = env.goal_position
         prev_dist = get_distance(obs, goal_pos)
         ep_shaped_reward = 0
         
         for step in range(500):
-            # Epsilon-greedy
-            if random.random() < epsilon:
-                action = random.randint(0, 8)
-            else:
-                state_t = torch.FloatTensor(obs[:6]).unsqueeze(0).to(device)
-                state_t[:, 0:2] /= 128.0 
-                with torch.no_grad():
-                    action = agent.policy_net(state_t).argmax().item()
+            # FIX 4: Use agent.act() to keep logic unified
+            # We temporarily override agent.epsilon for the training loop
+            agent.epsilon = epsilon
+            action = agent.act(obs)
 
             next_obs, reward, terminated, truncated, info = env.step(action)
             curr_dist = get_distance(next_obs, goal_pos)
             
-            # UPDATED: Now passing args.step_penalty to the reward function
             shaped_r = calculate_sailing_reward(
                 obs=obs[:6], 
                 reward=reward, 
@@ -91,7 +95,6 @@ def train():
             
             memory.push(obs[:6], action, shaped_r, next_obs[:6], terminated)
             
-            # (Optimization step stays the same...)
             if step % 4 == 0 and len(memory) > args.batch_size:
                 states, actions, rewards, snext, dones = memory.sample()
                 current_q = agent.policy_net(states).gather(1, actions)
@@ -110,39 +113,28 @@ def train():
             if terminated or truncated:
                 break
         
-        # Calculate performance metrics
         success = 1 if reward == 100 else 0
         success_window.append(success)
         reward_window.append(ep_shaped_reward)
-        
         avg_success = np.mean(success_window)
         avg_reward = np.mean(reward_window)
         
-        # --- COMPOSITE SAVE BEST LOGIC ---
-        # Metric = (SuccessRate * 1000) + AvgReward 
-        # This prioritizes reaching the goal, then falling back to distance/efficiency
         current_metric = (avg_success * 1000) + avg_reward
         
-        # 3. Update the "Save Best" logic to use the dynamic path
-        if ep > 50 and current_metric > best_metric:
+        if ep > 20 and current_metric > best_metric:
             best_metric = current_metric
             torch.save(agent.policy_net.state_dict(), weights_path)
-            print(f" Saved New Best to {os.path.basename(weights_path)} (Metric: {best_metric:.2f})")
+            print(f" New Best! Metric: {best_metric:.2f} | Scene: {scene}")
 
-        # Update exploration and target network
         epsilon = max(0.05, epsilon * args.epsilon_decay)
         if ep % args.target_update == 0:
             agent.target_net.load_state_dict(agent.policy_net.state_dict())
             
-        # Logging to CSV
         with open(log_file, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([ep, ep_shaped_reward, step + 1, success])
 
-        if ep % 50 == 0:
-            print(f"Ep {ep:4d} | Metric: {current_metric:7.2f} | Eps: {epsilon:.3f} | Scene: {scene}")
-
-    print(f"✅ Training finished. Weights saved to Google Drive.")
+    print(f"✅ Training finished.")
 
 if __name__ == "__main__":
     train()
