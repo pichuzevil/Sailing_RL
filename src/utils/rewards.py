@@ -1,64 +1,72 @@
 import numpy as np
+from sailing_physics import calculate_sailing_efficiency
+
+def get_island_distance(x, y):
+    """
+    Calculates the exact Euclidean distance from (x, y) to the nearest point 
+    on the hardcoded house-shaped island.
+    """
+    # 1. Distance to the Rectangle (Main Body)
+    # Bounds: X[38, 90], Y[43, 85]
+    dx = max(38 - x, 0, x - 90)
+    dy = max(43 - y, 0, y - 85)
+    dist_rect = np.sqrt(dx**2 + dy**2)
+
+    # 2. Distance to the Triangle (The Southern Tip)
+    # Apex: (64, 17), Base connects to rect at Y=43
+    # This simplified distance covers the southern approach effectively
+    dx_tri = max(38 - x, 0, x - 90)
+    dy_tri = max(17 - y, 0, y - 43)
+    dist_tri = np.sqrt(dx_tri**2 + dy_tri**2)
+
+    return min(dist_rect, dist_tri)
 
 def calculate_enhanced_reward(state, next_state, action, prev_action, reward, terminated, info, step_penalty=1.2, goal_pos=(64, 127)):
-    """
-    Hardened Reward Shaping for Sailing Navigation.
-    Optimized for the 'House' island geometry and No-Go Zone physics.
-    """
-    # 1. State Extraction
+    # 1. Coordinate and Vector Extraction
     curr_pos = np.array(state[:2])
     next_pos = np.array(next_state[:2])
-    vel_vec = np.array([next_state[2], next_state[3]])
     wind_vec = np.array([next_state[4], next_state[5]])
     
-    # 2. High-Precision VMG (Velocity Made Good)
-    vec_to_goal = np.array([goal_pos[0] - next_pos[0], goal_pos[1] - next_pos[1]])
-    dist_to_goal = np.linalg.norm(vec_to_goal)
-    unit_vec_to_goal = vec_to_goal / (dist_to_goal + 1e-6)
-    
-    # Projection of velocity onto the goal vector
-    vmg = np.dot(vel_vec, unit_vec_to_goal)
-    shaped_r = vmg * 5.0 
-    
-    # 3. Time Pressure (Step Penalty)
-    shaped_r -= step_penalty 
-
-    # 4. Physics-Aware "In Irons" Penalty
-    # According to sailing_physics.py, < 45 degrees to wind is the No-Go Zone.
-    if np.linalg.norm(wind_vec) > 0 and np.linalg.norm(vel_vec) > 0:
-        unit_wind_to = wind_vec / np.linalg.norm(wind_vec)
-        unit_boat_dir = vel_vec / np.linalg.norm(vel_vec)
+    # 2. Time-Optimal Progress (Isochrone Logic)
+    def get_sailing_dist(pos, wind):
+        vec_to_goal = goal_pos - pos
+        dist = np.linalg.norm(vec_to_goal)
+        if dist < 1e-6: return 0
         
-        # cos_sim -1.0 means pointing directly INTO the wind (North wind vs North boat)
-        cos_sim = np.dot(unit_boat_dir, unit_wind_to)
+        unit_path = vec_to_goal / dist
+        unit_wind = wind / (np.linalg.norm(wind) + 1e-6)
+        eff = calculate_sailing_efficiency(unit_path, unit_wind)
         
-        # 45 degrees corresponds to cos_sim of -0.707
-        if cos_sim < -0.707: 
-            # Efficiency is only 0.05 here; we punish the agent for wasting time
-            shaped_r -= 2.0 
+        # Penalize distance by efficiency (lower eff = 'further' away)
+        return dist / (eff + 0.1)
 
-    # 5. Static Island "Radar" Penalty (Proactive Avoidance)
-    # The 'House' island center is at [64, 51]. 
-    island_center = np.array([64, 51])
-    dist_to_island = np.linalg.norm(next_pos - island_center)
+    s_dist_old = get_sailing_dist(curr_pos, wind_vec)
+    s_dist_new = get_sailing_dist(next_pos, wind_vec)
     
-    # If within 25 pixels of the island center, apply a 'grazing' penalty.
-    # This prevents the agent from trying to cut the corner at [64, 17].
-    if dist_to_island < 30:
-        shaped_r -= 0.5
+    # Reward progress in 'Sailing Time' space
+    shaped_r = (s_dist_old - s_dist_new) * 2.0
+    
+    # 3. GEOMETRIC ISLAND PENALTY (The "Force Field")
+    # We use a 15-pixel "Rumble Strip" buffer around the exact island shape
+    dist_to_land = get_island_distance(next_pos[0], next_pos[1])
+    
+    if dist_to_land < 4:
+        # Exponential penalty: tiny at 15px, massive at 1px
+        # This forces the agent to 'veer' away from the top-left corner
+        proximity_penalty = (4 - dist_to_land) ** 1.5
+        shaped_r -= proximity_penalty * 2
 
-    # 6. Action Smoothness
+    # 4. Global Costs
+    shaped_r -= step_penalty
     if action != prev_action:
-        shaped_r -= 1.0 # Slightly increased to favor long tacks
+        shaped_r -= -2.5 # Momentum penalty
 
-    # 7. Termination Logic (CRITICAL FIX)
+    # 5. Terminal Constraints
     if terminated:
         if reward >= 100:
-            # Reached Goal
-            shaped_r += 1000.0 
+            shaped_r += 1000.0 # Goal bonus
         else:
-            # CRASHED or STUCK: This must be huge to outweigh the step_penalty!
-            # If the agent crashes, it loses more than it could ever save in time.
-            shaped_r -= 500.0
-
+            # Massive collision penalty to discourage corner-clipping
+            shaped_r -= 1000.0 
+            
     return shaped_r

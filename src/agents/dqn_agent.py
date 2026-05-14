@@ -35,10 +35,8 @@ class DQNAgent(BaseAgent):
 
     def preprocess_obs(self, observation, goal_pos=(64, 127)):
         """
-        Transforms raw observation into an 11-feature vector.
-        Features 1-6: Normalized Position, Velocity, Wind.
-        Features 7-10: Relative Goal Navigation (dx, dy, dist, angle).
-        Feature 11: Island Proximity (Static Radar).
+        Transforms raw observation into a high-signal 11-feature vector.
+        Feature 11 is now a Geometric Radar that respects island corners.
         """
         # 1. Base 6 features (Normalization)
         obs = observation[:6].copy()
@@ -52,17 +50,26 @@ class DQNAgent(BaseAgent):
         dist_g = np.sqrt(dx_g**2 + dy_g**2)
         angle_g = np.arctan2(dy_g, dx_g) / np.pi 
         
-        # 3. STATIC ISLAND RADAR (Feature 11)
-        # The island center is roughly (64, 51) based on the 'House' shape.
-        # We calculate the distance to this fixed obstacle center.
-        island_center = np.array([64.0, 51.0])
-        dx_i = (observation[0] - island_center[0])
-        dy_i = (observation[1] - island_center[1])
-        dist_to_island = np.sqrt(dx_i**2 + dy_i**2)
+        # 3. GEOMETRIC ISLAND RADAR (Feature 11)
+        x, y = observation[0], observation[1]
         
-        # Proximity signal: 1.0 = Far/Safe, 0.0 = Right on the island.
-        # The house shape has a max radius of ~35-40 pixels.
-        proximity_radar = np.clip((dist_to_island - 15) / 35.0, 0, 1)
+        # Exact distance to the Rectangle body: X[38, 90], Y[43, 85]
+        dx_rect = max(38 - x, 0, x - 90)
+        dy_rect = max(43 - y, 0, y - 85)
+        dist_rect = np.sqrt(dx_rect**2 + dy_rect**2)
+        
+        # Exact distance to the Triangle tip: (64, 17)
+        # We approximate the southern reach to ensure the point is avoided
+        dx_tri = max(38 - x, 0, x - 90)
+        dy_tri = max(17 - y, 0, y - 43)
+        dist_tri = np.sqrt(dx_tri**2 + dy_tri**2)
+        
+        # Final raw distance to the nearest part of the house
+        raw_dist = min(dist_rect, dist_tri)
+        
+        # Normalize Radar signal: 
+        # 0.0 = Right on the edge/corner, 1.0 = Safe (>20 pixels away)
+        proximity_radar = np.clip(raw_dist / 20.0, 0, 1)
         
         return np.concatenate([
             obs, 
