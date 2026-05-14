@@ -2,10 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 class SailingDuelingQNetwork(nn.Module):
     def __init__(self, state_size=10, action_size=9, hidden_size=256):
         super(SailingDuelingQNetwork, self).__init__()
