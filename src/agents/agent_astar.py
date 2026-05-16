@@ -1,25 +1,36 @@
 import numpy as np
 import heapq
-from typing import Optional
+from typing import Optional, Dict, Any
+
 try:
     from agents.base_agent import BaseAgent 
 except ImportError:
     from evaluator.base_agent import BaseAgent
 
 class MyAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__()
+        
+        # 1. OPTUNA CONFIGURATION
+        # If no config is provided, we use the best known baseline
+        self.config = config or {
+            'max_nodes': 50000,
+            'safety_buffer': 2.0,
+            'replan_freq': 8,
+            'h_factor': 0.707,      # The VMG efficiency factor
+            'bucketing_res': 2.0,    # Spatial precision
+            'vmg_weight': 1.0       # Weight of vertical progress
+        }
+
         # Environment Constants
         self.max_speed = 8.0
         self.inertia_factor = 0.3
         self.mean_rotation = 0.5
         self.goal_pos = np.array([64, 127])
         
-        # Safety & Planning Parameters
-        self.safety_buffer = 2.0 # Padding for inertia/jitter
+        # Internal State
         self.world_map = None
         self.planned_path = []
-        self.replan_freq = 3 # Re-sync with environment every 3 steps
         self.steps_since_plan = 0
         
         # Directions: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW, 8=Stay
@@ -47,22 +58,19 @@ class MyAgent(BaseAgent):
                          initial_wind[0]*s + initial_wind[1]*c])
 
     def _is_collision(self, pos):
-        """Ultra-precise collision check combining hard-coded and map data."""
         x, y = pos[0], pos[1]
+        sb = self.config['safety_buffer']
         
-        # 1. Hard-coded Triangle Tip (The 'training_3' obstacle)
-        # We use a circular buffer around (64, 17)
-        if np.sqrt((x - 64)**2 + (y - 17)**2) < (self.safety_buffer + 1.0):
+        # Hard-coded Triangle Tip
+        if np.sqrt((x - 64)**2 + (y - 17)**2) < (sb + 1.0):
             return True
 
-        # 2. Hard-coded Rectangle Body: [38, 90], [43, 85]
-        if (38 - self.safety_buffer <= x <= 90 + self.safety_buffer) and \
-           (43 - self.safety_buffer <= y <= 85 + self.safety_buffer):
+        # Hard-coded Rectangle Body
+        if (38 - sb <= x <= 90 + sb) and (43 - sb <= y <= 85 + sb):
             return True
             
-        # 3. Dynamic world_map check (Highest Priority)
+        # Dynamic world_map check
         if self.world_map is not None:
-            # Check a 3x3 area around the boat for extra safety
             for dx in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
                     gx, gy = int(round(x + dx)), int(round(y + dy))
@@ -78,15 +86,11 @@ class MyAgent(BaseAgent):
                 min(yA, yB) - epsilon <= yP <= max(yA, yB) + epsilon)
 
     def plan_path(self, start_pos, start_vel, start_wind):
-        # Priority Queue: (f, t, x, y, vx, vy, path, collided)
         pq = [(0, 0, start_pos[0], start_pos[1], start_vel[0], start_vel[1], [])]
         visited = {} 
-        
-        best_h = float('inf')
-        best_path_so_far = [0] # Default North
-
-        nodes_explored = 0
-        max_nodes = 30000 # Increased to find the 'detour' around the tip
+        best_h, best_path_so_far = float('inf'), [0]
+        nodes_explored, max_nodes = 0, self.config['max_nodes']
+        res = self.config['bucketing_res']
 
         while pq and nodes_explored < max_nodes:
             f, t, x, y, vx, vy, path = heapq.heappop(pq)
@@ -94,23 +98,17 @@ class MyAgent(BaseAgent):
 
             curr_pos = np.array([x, y])
             dist = np.linalg.norm(curr_pos - self.goal_pos)
-            
             if dist < 1.5: return path
-
-            # UPDATE BEST PATH: Only if this path hasn't hit an island!
             if dist < best_h:
-                best_h = dist
-                best_path_so_far = path
+                best_h, best_path_so_far = dist, path
 
-            # BUCKETING: Finer resolution (2.0) to navigate tight corners
-            state_key = (int(x // 2), int(y // 2), int(vx), int(vy))
+            state_key = (int(x // res), int(y // res), int(vx), int(vy))
             if state_key in visited and visited[state_key] <= t: continue
             visited[state_key] = t
 
             current_wind = self._predict_wind(start_wind, t)
 
             for i, a_dir in enumerate(self.action_dirs):
-                # Physics calculation
                 eff = self._get_efficiency(a_dir, current_wind)
                 v_next = self.inertia_factor * np.array([vx, vy]) + \
                          (1 - self.inertia_factor) * (eff * self.max_speed * a_dir)
@@ -118,7 +116,6 @@ class MyAgent(BaseAgent):
                 
                 new_pos = curr_pos + v_disc
                 
-                # COLLISION CHECK: Check 5 points along the path for high-speed safety
                 is_safe = True
                 for step in [0.25, 0.5, 0.75, 1.0]:
                     if self._is_collision(curr_pos + step * v_disc):
@@ -126,10 +123,9 @@ class MyAgent(BaseAgent):
                         break
                 if not is_safe: continue
 
-                # HEURISTIC: VMG (Velocity Made Good)
-                # We reward moving towards Y=127 more than X alignment
+                # HEURISTIC: Using optimized factors
                 y_remaining = 127 - new_pos[1]
-                h = y_remaining / (self.max_speed * 0.707)
+                h = (y_remaining * self.config['vmg_weight']) / (self.max_speed * self.config['h_factor'])
                 
                 heapq.heappush(pq, (t + 1 + h, t + 1, new_pos[0], new_pos[1], v_disc[0], v_disc[1], path + [i]))
 
@@ -143,8 +139,7 @@ class MyAgent(BaseAgent):
         if self.world_map is None and len(observation) > 100:
             self.world_map = observation[-16384:].reshape((128, 128))
 
-        # Re-plan if we drift due to 0.01 deg jitter
-        if not self.planned_path or self.steps_since_plan >= self.replan_freq:
+        if not self.planned_path or self.steps_since_plan >= self.config['replan_freq']:
             self.planned_path = self.plan_path(pos, vel, wind)
             self.steps_since_plan = 0
 
